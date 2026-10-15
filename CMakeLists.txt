@@ -21,3 +21,4 @@ target_include_directories(codm_tex PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/LSPlt/lsplt/src/main/jni/include)
 target_link_libraries(codm_tex lsplt_static log android)
+
