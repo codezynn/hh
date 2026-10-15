@@ -18,30 +18,57 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
+
+      - name: Locate Android NDK
+        id: ndk
+        run: |
+          # ubuntu-latest ships NDK under $ANDROID_SDK_ROOT/ndk/<ver>
+          if [ -n "$ANDROID_NDK_HOME" ] && [ -f "$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" ]; then
+            echo "path=$ANDROID_NDK_HOME" >> "$GITHUB_OUTPUT"
+            echo "Using ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
+            exit 0
+          fi
+          ROOT="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}"
+          if [ -d "$ROOT/ndk" ]; then
+            VER=$(ls -1 "$ROOT/ndk" | sort -V | tail -1)
+            echo "path=$ROOT/ndk/$VER" >> "$GITHUB_OUTPUT"
+            echo "ANDROID_NDK_HOME=$ROOT/ndk/$VER" >> "$GITHUB_ENV"
+            echo "Using NDK $VER"
+            exit 0
+          fi
+          echo "::error::No Android NDK found"
+          exit 1
 
       - name: Fetch build dependencies
         run: |
           curl -fsSL -o zygisk.hpp \
             https://raw.githubusercontent.com/topjohnwu/zygisk-module-sample/master/module/jni/zygisk.hpp
           git clone --depth 1 https://github.com/LSPosed/LSPlt
+          # CMake 3.31+ rejects cmake_minimum_required < 3.5; bump LSPlt's declaration
+          find LSPlt -name CMakeLists.txt -print0 | xargs -0 sed -i \
+            's/cmake_minimum_required(VERSION 3\.[0-9.]*)/cmake_minimum_required(VERSION 3.22)/'
 
       - name: Configure + compile arm64-v8a
         run: |
           cmake -B build-arm64 \
-            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+            -DCMAKE_TOOLCHAIN_FILE="${{ steps.ndk.outputs.path }}/build/cmake/android.toolchain.cmake" \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM="$ANDROID_PLATFORM" \
-            -DCMAKE_BUILD_TYPE=Release
+            -DANDROID_NDK="${{ steps.ndk.outputs.path }}" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
           cmake --build build-arm64 -j"$(nproc)"
 
       - name: Configure + compile armeabi-v7a
         run: |
           cmake -B build-arm32 \
-            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+            -DCMAKE_TOOLCHAIN_FILE="${{ steps.ndk.outputs.path }}/build/cmake/android.toolchain.cmake" \
             -DANDROID_ABI=armeabi-v7a \
             -DANDROID_PLATFORM="$ANDROID_PLATFORM" \
-            -DCMAKE_BUILD_TYPE=Release
+            -DANDROID_NDK="${{ steps.ndk.outputs.path }}" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
           cmake --build build-arm32 -j"$(nproc)"
 
       - name: Read module version
@@ -75,9 +102,9 @@ jobs:
           [ "$MV" = "$UV" ] || { echo "::error::UI version in webroot/index.html ($UV) differs from module.prop ($MV)"; exit 1; }
 
       - name: Upload module package
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v4
         with:
-          name: codm-blocky-textures-${{ steps.meta.outputs.version }}
+          name: codm-texture-tweaks-${{ steps.meta.outputs.version }}
           path: out/
           if-no-files-found: error
           retention-days: 30
